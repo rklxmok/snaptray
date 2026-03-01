@@ -328,6 +328,18 @@ class SnapcastTray(QSystemTrayIcon):
             QMenu::separator { height: 1px; background: #3b4261; margin: 4px 8px; }
         """)
 
+        # Connect / Disconnect
+        self.connect_action = QAction("Connect")
+        self.connect_action.triggered.connect(self.toggle_connection)
+        menu.addAction(self.connect_action)
+
+        # Quit
+        quit_action = QAction("Quit")
+        quit_action.triggered.connect(self.quit_app)
+        menu.addAction(quit_action)
+
+        menu.addSeparator()
+
         # Status
         self.status_action = QAction("Disconnected")
         self.status_action.setEnabled(False)
@@ -427,20 +439,6 @@ class SnapcastTray(QSystemTrayIcon):
             sink_action = QWidgetAction(menu)
             sink_action.setDefaultWidget(sink_widget)
             menu.addAction(sink_action)
-
-        menu.addSeparator()
-
-        # Connect / Disconnect
-        self.connect_action = QAction("Connect")
-        self.connect_action.triggered.connect(self.toggle_connection)
-        menu.addAction(self.connect_action)
-
-        menu.addSeparator()
-
-        # Quit
-        quit_action = QAction("Quit")
-        quit_action.triggered.connect(self.quit_app)
-        menu.addAction(quit_action)
 
         self.setContextMenu(menu)
 
