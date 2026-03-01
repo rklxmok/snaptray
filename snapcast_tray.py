@@ -334,9 +334,9 @@ class SnapcastTray(QSystemTrayIcon):
         menu.addAction(self.connect_action)
 
         # Quit
-        quit_action = QAction("Quit")
-        quit_action.triggered.connect(self.quit_app)
-        menu.addAction(quit_action)
+        self.quit_action = QAction("Quit")
+        self.quit_action.triggered.connect(self.quit_app)
+        menu.addAction(self.quit_action)
 
         menu.addSeparator()
 
