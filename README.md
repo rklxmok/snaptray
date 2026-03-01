@@ -20,19 +20,19 @@ System tray app for [Snapcast](https://github.com/badaix/snapcast) clients. Cont
 
 - **Python 3.8+**
 - **PyQt5** (for system tray / Qt widgets)
-- **snapclient** (optional — needed for connect/disconnect)
+- **snapcast** (optional — needed for connect/disconnect)
 
 ### Installing dependencies
 
 ```bash
 # Arch / Manjaro / Garuda
-sudo pacman -S python-pyqt5 snapclient
+sudo pacman -S python-pyqt5 snapcast
 
 # Debian / Ubuntu
-sudo apt install python3-pyqt5 snapclient
+sudo apt install python3-pyqt5 snapcast
 
 # Fedora
-sudo dnf install python3-qt5 snapclient
+sudo dnf install python3-qt5 snapcast
 ```
 
 ## Install
