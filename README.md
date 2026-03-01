@@ -64,9 +64,18 @@ SnapTray auto-starts with your graphical session on login.
 
 ### Installing dependencies
 
-1. Install [Python 3.8+](https://python.org) — check **"Add Python to PATH"** during install
-2. Install PyQt5: `pip install PyQt5`
-3. Install [Snapcast](https://github.com/badaix/snapcast/releases) — download the Windows release and add `snapclient.exe` to your PATH
+```powershell
+winget install Git.Git
+winget install Python.Python.3.12
+```
+
+Close and reopen PowerShell after installing, then:
+
+```powershell
+pip install PyQt5
+```
+
+Install [Snapcast](https://github.com/badaix/snapcast/releases) — download the Windows release and add `snapclient.exe` to your PATH.
 
 ### Install
 
