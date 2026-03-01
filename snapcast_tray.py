@@ -23,7 +23,7 @@ from PyQt5.QtCore import QPoint
 if sys.platform != "win32":
     import signal
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 IS_WINDOWS = sys.platform == "win32"
 DEFAULT_SERVER = "10.10.2.50"
 API_PORT = 1780
@@ -83,9 +83,9 @@ def get_macs():
 
 
 def detect_audio_sink():
-    """Detect the best audio sink for snapclient."""
+    """Detect the best audio sink for snapclient. Windows uses default device."""
     if IS_WINDOWS:
-        return "wasapi"
+        return None
     try:
         subprocess.check_output(["pactl", "info"], stderr=subprocess.DEVNULL, timeout=2)
         return "pulse"
@@ -164,56 +164,13 @@ def snapclient_version():
     return (0, 28)
 
 
-def get_sink_options():
-    """Return audio sink options appropriate for the platform.
-    On Windows, queries snapclient --list to discover WASAPI devices.
-    """
-    if IS_WINDOWS:
-        devices = _list_wasapi_devices()
-        if devices:
-            return devices
-        return ["wasapi"]
-    return ["pulse", "sysdefault", "hw:0,0", "hw:1,0", "hw:2,0", "hw:3,0"]
-
-
-def _list_wasapi_devices():
-    """Parse snapclient --list to get WASAPI device names on Windows."""
-    try:
-        out = subprocess.check_output(
-            [SNAPCLIENT_BIN, "--list"],
-            text=True, stderr=subprocess.STDOUT, timeout=5
-        )
-        devices = []
-        in_wasapi = False
-        for line in out.splitlines():
-            stripped = line.strip()
-            # Detect the wasapi backend section
-            if stripped.startswith(("wasapi", "WASAPI")) or "wasapi" in stripped.lower().split(":")[0:1]:
-                in_wasapi = True
-                continue
-            # New backend section ends wasapi
-            if in_wasapi and not line.startswith((" ", "\t")) and stripped and ":" in stripped:
-                in_wasapi = False
-                continue
-            # Parse device lines (indented, like "  0: Speakers (Realtek ...)")
-            if in_wasapi and stripped:
-                # Format: "index: Device Name"
-                if ":" in stripped:
-                    dev_name = stripped.split(":", 1)[1].strip()
-                    if dev_name:
-                        devices.append(f"wasapi:///{dev_name}")
-        return devices
-    except Exception:
-        return []
-
-
 class SnapcastTray(QSystemTrayIcon):
     def __init__(self, app):
         super().__init__()
         self.app = app
         self.cfg = load_config()
         self.server = self.cfg.get("server", DEFAULT_SERVER)
-        self.audio_sink = self.cfg.get("sink", detect_audio_sink() or ("wasapi" if IS_WINDOWS else "pulse"))
+        self.audio_sink = self.cfg.get("sink", detect_audio_sink() or "pulse") if not IS_WINDOWS else None
         self.my_macs = get_macs()
         self.my_client_id = None
         self.my_group_id = None
@@ -270,6 +227,8 @@ class SnapcastTray(QSystemTrayIcon):
         """Start snapclient process."""
         self.stop_snapclient(kill_all=True)
         ver = snapclient_version()
+
+        # Linux: pass -s sink, Windows: no sink arg (uses default audio device)
         sink_args = ["-s", self.audio_sink] if self.audio_sink else []
 
         if ver >= (0, 28):
@@ -432,33 +391,35 @@ class SnapcastTray(QSystemTrayIcon):
         srv_action.setDefaultWidget(srv_widget)
         menu.addAction(srv_action)
 
-        # Audio output
-        sink_widget = QWidget()
-        sink_widget.setStyleSheet("background: transparent;")
-        sink_layout = QHBoxLayout(sink_widget)
-        sink_layout.setContentsMargins(12, 4, 12, 4)
+        # Audio output selector — Linux only
+        # Windows uses default audio device, change output in Windows Sound Settings
+        if not IS_WINDOWS:
+            sink_widget = QWidget()
+            sink_widget.setStyleSheet("background: transparent;")
+            sink_layout = QHBoxLayout(sink_widget)
+            sink_layout.setContentsMargins(12, 4, 12, 4)
 
-        sink_lbl = QLabel("Output:")
-        sink_lbl.setStyleSheet("color: #a9b1d6; font-size: 12px;")
-        sink_layout.addWidget(sink_lbl)
+            sink_lbl = QLabel("Output:")
+            sink_lbl.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+            sink_layout.addWidget(sink_lbl)
 
-        self.sink_combo = QComboBox()
-        self.sink_combo.setStyleSheet("""
-            QComboBox { background: #24283b; border: 1px solid #3b4261;
-                color: #c0caf5; border-radius: 3px; padding: 3px 6px; font-size: 12px; }
-            QComboBox QAbstractItemView { background: #1a1b26; color: #c0caf5;
-                selection-background-color: #2a2f3a; }
-        """)
-        self.sink_combo.addItems(get_sink_options())
-        idx = self.sink_combo.findText(self.audio_sink)
-        if idx >= 0:
-            self.sink_combo.setCurrentIndex(idx)
-        self.sink_combo.currentTextChanged.connect(self._on_sink_change)
-        sink_layout.addWidget(self.sink_combo)
+            self.sink_combo = QComboBox()
+            self.sink_combo.setStyleSheet("""
+                QComboBox { background: #24283b; border: 1px solid #3b4261;
+                    color: #c0caf5; border-radius: 3px; padding: 3px 6px; font-size: 12px; }
+                QComboBox QAbstractItemView { background: #1a1b26; color: #c0caf5;
+                    selection-background-color: #2a2f3a; }
+            """)
+            self.sink_combo.addItems(["pulse", "sysdefault", "hw:0,0", "hw:1,0", "hw:2,0", "hw:3,0"])
+            idx = self.sink_combo.findText(self.audio_sink)
+            if idx >= 0:
+                self.sink_combo.setCurrentIndex(idx)
+            self.sink_combo.currentTextChanged.connect(self._on_sink_change)
+            sink_layout.addWidget(self.sink_combo)
 
-        sink_action = QWidgetAction(menu)
-        sink_action.setDefaultWidget(sink_widget)
-        menu.addAction(sink_action)
+            sink_action = QWidgetAction(menu)
+            sink_action.setDefaultWidget(sink_widget)
+            menu.addAction(sink_action)
 
         menu.addSeparator()
 
@@ -519,7 +480,8 @@ class SnapcastTray(QSystemTrayIcon):
 
     def save_settings(self):
         self.cfg["server"] = self.server
-        self.cfg["sink"] = self.audio_sink
+        if not IS_WINDOWS:
+            self.cfg["sink"] = self.audio_sink
         save_config(self.cfg)
 
     def poll_status(self):
