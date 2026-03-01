@@ -23,11 +23,14 @@ from PyQt5.QtCore import QPoint
 if sys.platform != "win32":
     import signal
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 IS_WINDOWS = sys.platform == "win32"
 DEFAULT_SERVER = "10.10.2.50"
 API_PORT = 1780
 SNAPCLIENT_BIN = "snapclient.exe" if IS_WINDOWS else "snapclient"
+
+# Hide console windows on Windows for all subprocess calls
+_SP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
 
 # Config path: %APPDATA%\SnapcastTray\ on Windows, ~/.config/ on Linux
 if IS_WINDOWS:
@@ -58,7 +61,8 @@ def get_macs():
         try:
             out = subprocess.check_output(
                 ["getmac", "/fo", "csv", "/nh"],
-                text=True, stderr=subprocess.DEVNULL, timeout=5
+                text=True, stderr=subprocess.DEVNULL, timeout=5,
+                **_SP_KWARGS
             )
             for line in out.strip().splitlines():
                 parts = line.split(",")
@@ -152,7 +156,8 @@ def snapclient_version():
     """Get snapclient version to determine CLI format."""
     try:
         out = subprocess.check_output(
-            [SNAPCLIENT_BIN, "--version"], text=True, stderr=subprocess.STDOUT
+            [SNAPCLIENT_BIN, "--version"], text=True, stderr=subprocess.STDOUT,
+            **_SP_KWARGS
         )
         for part in out.split():
             if part.startswith("v") or (part[0:1].isdigit()):
@@ -214,7 +219,8 @@ class SnapcastTray(QSystemTrayIcon):
             if IS_WINDOWS:
                 out = subprocess.check_output(
                     ["tasklist", "/FI", f"IMAGENAME eq {SNAPCLIENT_BIN}", "/NH"],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5
+                    text=True, stderr=subprocess.DEVNULL, timeout=5,
+                    **_SP_KWARGS
                 )
                 return SNAPCLIENT_BIN.lower() in out.lower()
             else:
@@ -240,7 +246,7 @@ class SnapcastTray(QSystemTrayIcon):
             if IS_WINDOWS:
                 self.snapclient_proc = subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
                 )
             else:
                 self.snapclient_proc = subprocess.Popen(
@@ -286,7 +292,8 @@ class SnapcastTray(QSystemTrayIcon):
                 if IS_WINDOWS:
                     subprocess.run(
                         ["taskkill", "/IM", SNAPCLIENT_BIN, "/F"],
-                        timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        **_SP_KWARGS
                     )
                 else:
                     subprocess.run(
@@ -428,12 +435,20 @@ class SnapcastTray(QSystemTrayIcon):
         self.connect_action.triggered.connect(self.toggle_connection)
         menu.addAction(self.connect_action)
 
+        menu.addSeparator()
+
         # Quit
         quit_action = QAction("Quit")
-        quit_action.triggered.connect(self.app.quit)
+        quit_action.triggered.connect(self.quit_app)
         menu.addAction(quit_action)
 
         self.setContextMenu(menu)
+
+    def quit_app(self):
+        """Clean shutdown — stop snapclient and exit."""
+        self.poll_timer.stop()
+        self.stop_snapclient(kill_all=True)
+        self.app.quit()
 
     def on_activate(self, reason):
         if reason == QSystemTrayIcon.Trigger:
