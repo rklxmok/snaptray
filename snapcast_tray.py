@@ -580,6 +580,10 @@ class SnapcastTray(QSystemTrayIcon):
 
 
 def main():
+    # Enable proper high-DPI scaling (4K displays, Windows 200% etc.)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Snapcast Tray")
