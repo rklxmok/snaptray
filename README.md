@@ -75,9 +75,33 @@ Close and reopen PowerShell after installing, then:
 pip install PyQt5
 ```
 
-Install [Snapcast](https://github.com/badaix/snapcast/releases) — download the Windows release and add `snapclient.exe` to your PATH.
+### Installing snapclient
 
-### Install
+Download the Windows build from [Snapcast releases](https://github.com/badaix/snapcast/releases) (e.g. `snapcast_0.28.0-1_win64.zip`), then:
+
+```powershell
+# Download and extract
+curl.exe -LO https://github.com/badaix/snapcast/releases/download/v0.28.0/snapcast_0.28.0-1_win64.zip
+Expand-Archive snapcast_0.28.0-1_win64.zip -DestinationPath snapcast
+
+# Install Visual C++ runtime (required)
+.\snapcast\snapclient_win64\vc_redist.x64.exe
+
+# Copy to permanent location
+mkdir "C:\Program Files\Snapcast" -Force
+Copy-Item .\snapcast\snapclient_win64\* "C:\Program Files\Snapcast\" -Force
+
+# Add to PATH (persistent, user-level)
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Program Files\Snapcast", "User")
+```
+
+Close and reopen PowerShell, then verify:
+
+```powershell
+snapclient.exe --version
+```
+
+### Install SnapTray
 
 ```powershell
 git clone https://github.com/rklxmok/snaptray.git
