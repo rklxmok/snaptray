@@ -3,13 +3,14 @@
 Snapcast Tray — System tray app for Snapcast client control.
 Volume slider, mute toggle, server connect/disconnect, now-playing info.
 Manages the local snapclient process and talks to snapserver JSON-RPC on :1780.
+Cross-platform: Linux and Windows.
 """
 
 import sys
 import os
 import json
 import subprocess
-import signal
+import shutil
 import urllib.request
 from PyQt5.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QAction, QWidgetAction,
@@ -19,10 +20,21 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPolygon
 from PyQt5.QtCore import QPoint
 
-VERSION = "1.2.0"
+if sys.platform != "win32":
+    import signal
+
+VERSION = "2.0.0"
+IS_WINDOWS = sys.platform == "win32"
 DEFAULT_SERVER = "10.10.2.50"
 API_PORT = 1780
-CONFIG_PATH = os.path.expanduser("~/.config/snapcast-tray.json")
+SNAPCLIENT_BIN = "snapclient.exe" if IS_WINDOWS else "snapclient"
+
+# Config path: %APPDATA%\SnapcastTray\ on Windows, ~/.config/ on Linux
+if IS_WINDOWS:
+    _appdata = os.getenv("APPDATA", os.path.expanduser("~/AppData/Roaming"))
+    CONFIG_PATH = os.path.join(_appdata, "SnapcastTray", "snapcast-tray.json")
+else:
+    CONFIG_PATH = os.path.expanduser("~/.config/snapcast-tray.json")
 
 
 def load_config():
@@ -42,21 +54,38 @@ def save_config(cfg):
 def get_macs():
     """Get all local MAC addresses to identify this client in Snapcast."""
     macs = set()
-    try:
-        out = subprocess.check_output(["ip", "link"], text=True)
-        for block in out.split("\n\n"):
-            if "state UP" in block or "state UNKNOWN" in block:
-                for line in block.split("\n"):
-                    line = line.strip()
-                    if line.startswith("link/ether"):
-                        macs.add(line.split()[1])
-    except Exception:
-        pass
+    if IS_WINDOWS:
+        try:
+            out = subprocess.check_output(
+                ["getmac", "/fo", "csv", "/nh"],
+                text=True, stderr=subprocess.DEVNULL, timeout=5
+            )
+            for line in out.strip().splitlines():
+                parts = line.split(",")
+                if parts:
+                    raw = parts[0].strip().strip('"')
+                    if raw and raw != "N/A" and len(raw) == 17 and "-" in raw:
+                        macs.add(raw.replace("-", ":").lower())
+        except Exception:
+            pass
+    else:
+        try:
+            out = subprocess.check_output(["ip", "link"], text=True)
+            for block in out.split("\n\n"):
+                if "state UP" in block or "state UNKNOWN" in block:
+                    for line in block.split("\n"):
+                        line = line.strip()
+                        if line.startswith("link/ether"):
+                            macs.add(line.split()[1])
+        except Exception:
+            pass
     return macs
 
 
 def detect_audio_sink():
     """Detect the best audio sink for snapclient."""
+    if IS_WINDOWS:
+        return "wasapi"
     try:
         subprocess.check_output(["pactl", "info"], stderr=subprocess.DEVNULL, timeout=2)
         return "pulse"
@@ -123,7 +152,7 @@ def snapclient_version():
     """Get snapclient version to determine CLI format."""
     try:
         out = subprocess.check_output(
-            ["snapclient", "--version"], text=True, stderr=subprocess.STDOUT
+            [SNAPCLIENT_BIN, "--version"], text=True, stderr=subprocess.STDOUT
         )
         for part in out.split():
             if part.startswith("v") or (part[0:1].isdigit()):
@@ -135,13 +164,20 @@ def snapclient_version():
     return (0, 28)
 
 
+def get_sink_options():
+    """Return audio sink options appropriate for the platform."""
+    if IS_WINDOWS:
+        return ["wasapi"]
+    return ["pulse", "sysdefault", "hw:0,0", "hw:1,0", "hw:2,0", "hw:3,0"]
+
+
 class SnapcastTray(QSystemTrayIcon):
     def __init__(self, app):
         super().__init__()
         self.app = app
         self.cfg = load_config()
         self.server = self.cfg.get("server", DEFAULT_SERVER)
-        self.audio_sink = self.cfg.get("sink", detect_audio_sink() or "pulse")
+        self.audio_sink = self.cfg.get("sink", detect_audio_sink() or ("wasapi" if IS_WINDOWS else "pulse"))
         self.my_macs = get_macs()
         self.my_client_id = None
         self.my_group_id = None
@@ -169,11 +205,12 @@ class SnapcastTray(QSystemTrayIcon):
         self.poll_timer.timeout.connect(self.poll_status)
         self.poll_timer.start(3000)
 
-        # Auto-connect on startup
-        if not self._snapclient_running():
-            self.start_snapclient()
-        else:
-            self.client_connected = True
+        # Auto-connect on startup if snapclient is installed
+        if shutil.which(SNAPCLIENT_BIN):
+            if not self._snapclient_running():
+                self.start_snapclient()
+            else:
+                self.client_connected = True
 
         self.poll_status()
         self.activated.connect(self.on_activate)
@@ -181,8 +218,15 @@ class SnapcastTray(QSystemTrayIcon):
 
     def _snapclient_running(self):
         try:
-            out = subprocess.check_output(["pgrep", "-x", "snapclient"], text=True).strip()
-            return bool(out)
+            if IS_WINDOWS:
+                out = subprocess.check_output(
+                    ["tasklist", "/FI", f"IMAGENAME eq {SNAPCLIENT_BIN}", "/NH"],
+                    text=True, stderr=subprocess.DEVNULL, timeout=5
+                )
+                return SNAPCLIENT_BIN.lower() in out.lower()
+            else:
+                out = subprocess.check_output(["pgrep", "-x", "snapclient"], text=True).strip()
+                return bool(out)
         except Exception:
             return False
 
@@ -193,15 +237,21 @@ class SnapcastTray(QSystemTrayIcon):
         sink_args = ["-s", self.audio_sink] if self.audio_sink else []
 
         if ver >= (0, 28):
-            cmd = ["snapclient"] + sink_args + [f"tcp://{self.server}:1704"]
+            cmd = [SNAPCLIENT_BIN] + sink_args + [f"tcp://{self.server}:1704"]
         else:
-            cmd = ["snapclient", "-h", self.server] + sink_args
+            cmd = [SNAPCLIENT_BIN, "-h", self.server] + sink_args
 
         try:
-            self.snapclient_proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
-            )
+            if IS_WINDOWS:
+                self.snapclient_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+            else:
+                self.snapclient_proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    preexec_fn=os.setsid
+                )
             self.client_connected = True
             self.connect_action.setText("Disconnect")
         except Exception as e:
@@ -209,18 +259,22 @@ class SnapcastTray(QSystemTrayIcon):
 
     def stop_snapclient(self, kill_all=False):
         """Stop snapclient process."""
-        # Stop systemd user service first so it doesn't auto-restart
-        try:
-            subprocess.run(
-                ["systemctl", "--user", "stop", "snapclient.service"],
-                timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
+        if not IS_WINDOWS:
+            # Stop systemd user service first so it doesn't auto-restart
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "stop", "snapclient.service"],
+                    timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception:
+                pass
         # Kill our managed process
         if self.snapclient_proc:
             try:
-                os.killpg(os.getpgid(self.snapclient_proc.pid), signal.SIGTERM)
+                if IS_WINDOWS:
+                    self.snapclient_proc.terminate()
+                else:
+                    os.killpg(os.getpgid(self.snapclient_proc.pid), signal.SIGTERM)
             except Exception:
                 try:
                     self.snapclient_proc.terminate()
@@ -234,10 +288,16 @@ class SnapcastTray(QSystemTrayIcon):
         # Kill any straggler snapclient processes
         if kill_all:
             try:
-                subprocess.run(
-                    ["pkill", "-x", "snapclient"],
-                    timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
+                if IS_WINDOWS:
+                    subprocess.run(
+                        ["taskkill", "/IM", SNAPCLIENT_BIN, "/F"],
+                        timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                else:
+                    subprocess.run(
+                        ["pkill", "-x", "snapclient"],
+                        timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
             except Exception:
                 pass
         self.client_connected = False
@@ -353,7 +413,7 @@ class SnapcastTray(QSystemTrayIcon):
             QComboBox QAbstractItemView { background: #1a1b26; color: #c0caf5;
                 selection-background-color: #2a2f3a; }
         """)
-        self.sink_combo.addItems(["pulse", "sysdefault", "hw:0,0", "hw:1,0", "hw:2,0", "hw:3,0"])
+        self.sink_combo.addItems(get_sink_options())
         idx = self.sink_combo.findText(self.audio_sink)
         if idx >= 0:
             self.sink_combo.setCurrentIndex(idx)

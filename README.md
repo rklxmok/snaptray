@@ -2,7 +2,7 @@
 
 System tray app for [Snapcast](https://github.com/badaix/snapcast) clients. Control volume, mute, connect/disconnect, and select audio output — all from your tray.
 
-![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Platform: Linux](https://img.shields.io/badge/platform-Linux-orange)
+![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Platform: Linux & Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-orange)
 
 ## Features
 
@@ -10,9 +10,9 @@ System tray app for [Snapcast](https://github.com/badaix/snapcast) clients. Cont
 - **Mute/Unmute** toggle
 - **Connect/Disconnect** — starts and stops the local snapclient process
 - **Server selector** — change server IP and reconnect (saved to config)
-- **Audio output selector** — pulse, sysdefault, or specific ALSA device
+- **Audio output selector** — pulse/sysdefault/ALSA (Linux), wasapi (Windows)
 - **Auto-detects** snapclient version (legacy `-h` vs new URI format)
-- **Auto-detects** PulseAudio/PipeWire for audio output
+- **Auto-detects** audio backend (PulseAudio/PipeWire on Linux, WASAPI on Windows)
 - **Tray icon** changes color: green (connected), grey (disconnected), red (muted)
 - **Multi-NIC support** — matches all local MAC addresses against Snapcast clients
 
@@ -21,6 +21,8 @@ System tray app for [Snapcast](https://github.com/badaix/snapcast) clients. Cont
 - **Python 3.8+**
 - **PyQt5** (for system tray / Qt widgets)
 - **snapcast** (optional — needed for connect/disconnect)
+
+## Linux
 
 ### Installing dependencies
 
@@ -35,7 +37,7 @@ sudo apt install python3-pyqt5 snapcast
 sudo dnf install python3-qt5 snapcast
 ```
 
-## Install
+### Install
 
 ```bash
 git clone https://github.com/rklxmok/snaptray.git
@@ -52,10 +54,38 @@ The installer:
 
 SnapTray auto-starts with your graphical session on login.
 
-## Uninstall
+### Uninstall (Linux)
 
 ```bash
 ./uninstall.sh
+```
+
+## Windows
+
+### Installing dependencies
+
+1. Install [Python 3.8+](https://python.org) — check **"Add Python to PATH"** during install
+2. Install PyQt5: `pip install PyQt5`
+3. Install [Snapcast](https://github.com/badaix/snapcast/releases) — download the Windows release and add `snapclient.exe` to your PATH
+
+### Install
+
+```powershell
+git clone https://github.com/rklxmok/snaptray.git
+cd snaptray
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The installer:
+1. Checks Python, PyQt5, and snapclient
+2. Copies `snapcast_tray.py` to `%APPDATA%\SnapcastTray\`
+3. Creates a startup shortcut (auto-starts on login)
+4. Launches SnapTray
+
+### Uninstall (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
 ## Usage
@@ -69,13 +99,15 @@ Right-click the tray icon to open the menu:
 | **Volume slider** | Drag to set volume (0-100%), debounced 200ms |
 | **Mute / Unmute** | Toggle mute on the Snapcast server |
 | **Server** | Edit server IP, press Enter to reconnect |
-| **Output** | Select audio sink (pulse, sysdefault, hw:X,X) |
+| **Output** | Select audio sink (pulse/sysdefault on Linux, wasapi on Windows) |
 | **Connect / Disconnect** | Start or stop the local snapclient process |
 | **Quit** | Exit SnapTray (doesn't stop snapclient) |
 
 ## Configuration
 
-Settings are saved to `~/.config/snapcast-tray.json`:
+Settings are saved to:
+- **Linux**: `~/.config/snapcast-tray.json`
+- **Windows**: `%APPDATA%\SnapcastTray\snapcast-tray.json`
 
 ```json
 {
@@ -83,6 +115,8 @@ Settings are saved to `~/.config/snapcast-tray.json`:
   "sink": "pulse"
 }
 ```
+
+On Windows, `sink` defaults to `"wasapi"`.
 
 ## How it works
 
@@ -94,6 +128,8 @@ For connect/disconnect, it manages the local `snapclient` process directly — d
 - **Older**: `snapclient -h SERVER -s pulse`
 
 ## Service management
+
+### Linux (systemd)
 
 ```bash
 # Check status
@@ -108,6 +144,14 @@ journalctl --user -u snapcast-tray -f
 # Stop
 systemctl --user stop snapcast-tray
 ```
+
+### Windows
+
+SnapTray runs via a startup shortcut. To manage it:
+
+- **Stop**: Right-click tray icon → Quit, or end `pythonw.exe` in Task Manager
+- **Disable auto-start**: Delete `SnapTray.lnk` from `shell:startup`
+- **Re-enable auto-start**: Run `install.ps1` again
 
 ## License
 
