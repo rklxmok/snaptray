@@ -23,7 +23,7 @@ from PyQt5.QtCore import QPoint
 if sys.platform != "win32":
     import signal
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 IS_WINDOWS = sys.platform == "win32"
 DEFAULT_SERVER = "10.10.2.50"
 API_PORT = 1780
@@ -165,10 +165,46 @@ def snapclient_version():
 
 
 def get_sink_options():
-    """Return audio sink options appropriate for the platform."""
+    """Return audio sink options appropriate for the platform.
+    On Windows, queries snapclient --list to discover WASAPI devices.
+    """
     if IS_WINDOWS:
+        devices = _list_wasapi_devices()
+        if devices:
+            return devices
         return ["wasapi"]
     return ["pulse", "sysdefault", "hw:0,0", "hw:1,0", "hw:2,0", "hw:3,0"]
+
+
+def _list_wasapi_devices():
+    """Parse snapclient --list to get WASAPI device names on Windows."""
+    try:
+        out = subprocess.check_output(
+            [SNAPCLIENT_BIN, "--list"],
+            text=True, stderr=subprocess.STDOUT, timeout=5
+        )
+        devices = []
+        in_wasapi = False
+        for line in out.splitlines():
+            stripped = line.strip()
+            # Detect the wasapi backend section
+            if stripped.startswith(("wasapi", "WASAPI")) or "wasapi" in stripped.lower().split(":")[0:1]:
+                in_wasapi = True
+                continue
+            # New backend section ends wasapi
+            if in_wasapi and not line.startswith((" ", "\t")) and stripped and ":" in stripped:
+                in_wasapi = False
+                continue
+            # Parse device lines (indented, like "  0: Speakers (Realtek ...)")
+            if in_wasapi and stripped:
+                # Format: "index: Device Name"
+                if ":" in stripped:
+                    dev_name = stripped.split(":", 1)[1].strip()
+                    if dev_name:
+                        devices.append(f"wasapi:///{dev_name}")
+        return devices
+    except Exception:
+        return []
 
 
 class SnapcastTray(QSystemTrayIcon):
@@ -466,8 +502,13 @@ class SnapcastTray(QSystemTrayIcon):
         self.update_icon()
 
     def _on_sink_change(self, text):
+        if text == self.audio_sink:
+            return
         self.audio_sink = text
         self.save_settings()
+        # Reconnect with new audio output
+        if self.client_connected or self._snapclient_running():
+            self.start_snapclient()
 
     def reconnect_server(self):
         new_server = self.srv_input.text().strip()
